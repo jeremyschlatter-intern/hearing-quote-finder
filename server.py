@@ -479,6 +479,8 @@ async def get_status():
     topics = await db.execute_fetchall("SELECT COUNT(*) FROM topics")
     quotes = await db.execute_fetchall("SELECT COUNT(*) FROM quotes")
     pending = await db.execute_fetchall("SELECT COUNT(*) FROM processing_status WHERE status IN ('processing', 'pending')")
+    total_records = await db.execute_fetchall("SELECT COUNT(*) FROM processing_status")
+    done_records = await db.execute_fetchall("SELECT COUNT(*) FROM processing_status WHERE status IN ('done', 'skipped', 'error')")
     await db.close()
 
     return {
@@ -487,6 +489,8 @@ async def get_status():
         "topics_count": topics[0][0],
         "quotes_count": quotes[0][0],
         "currently_processing": pending[0][0],
+        "processing_total": total_records[0][0],
+        "processing_done": done_records[0][0],
     }
 
 

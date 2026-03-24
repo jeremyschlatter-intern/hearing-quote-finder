@@ -293,6 +293,22 @@
         .processing-indicator .spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+        .progress-bar .progress-fill {
+            height: 100%; background: linear-gradient(90deg, var(--blue) 0%, var(--blue-light) 100%);
+            border-radius: 3px; transition: width 0.6s ease;
+        }
+
+        .header-progress { display: flex; align-items: center; gap: 10px; }
+        .header-progress-bar {
+            width: 120px; height: 5px; background: rgba(255,255,255,0.2);
+            border-radius: 3px; overflow: hidden;
+        }
+        .header-progress-bar .progress-fill {
+            height: 100%; background: var(--gold);
+            border-radius: 3px; transition: width 0.6s ease;
+        }
+
         .load-more { text-align: center; padding: 16px; }
         .results-count { font-size: 13px; color: var(--text-light); }
 
@@ -315,6 +331,7 @@
 <header>
     <div><h1>Hearing <span>Quote</span> Finder</h1></div>
     <div class="header-status" id="headerStatus">Loading...</div>
+
 </header>
 
 <div class="app-layout">
@@ -548,9 +565,18 @@
             document.getElementById('statHearings').textContent = data.hearings_total;
             document.getElementById('statTranscripts').textContent = data.hearings_with_transcripts;
             document.getElementById('statQuotes').textContent = data.quotes_count;
-            let statusText = `${data.hearings_with_transcripts} transcripts`;
-            if (data.currently_processing > 0) statusText += ` | Processing...`;
-            document.getElementById('headerStatus').textContent = statusText;
+
+            const el = document.getElementById('headerStatus');
+            if (data.currently_processing > 0 && data.processing_total > 0) {
+                const pct = Math.round((data.processing_done / data.processing_total) * 100);
+                el.innerHTML = `<div class="header-progress">
+                    <span>${data.hearings_with_transcripts} transcripts | Scanning ${pct}%</span>
+                    <div class="header-progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                    <span>${data.processing_done}/${data.processing_total}</span>
+                </div>`;
+            } else {
+                el.textContent = `${data.hearings_with_transcripts} transcripts`;
+            }
         } catch (e) {
             document.getElementById('headerStatus').textContent = 'Connection error';
         }
@@ -573,7 +599,9 @@
                 let metaText = `${t.quote_count} quotes`;
                 let processingHtml = '';
                 if (t.hearings_processing > 0 || (t.hearings_done < t.hearings_total && t.hearings_total > 0)) {
-                    processingHtml = `<span class="processing-indicator"><span class="spinner"></span>Scanning (${t.hearings_done}/${t.hearings_total})</span>`;
+                    const pct = t.hearings_total > 0 ? Math.round((t.hearings_done / t.hearings_total) * 100) : 0;
+                    processingHtml = `<span class="processing-indicator"><span class="spinner"></span>Scanning ${pct}% (${t.hearings_done}/${t.hearings_total})</span>
+                        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>`;
                 }
 
                 li.innerHTML = `
