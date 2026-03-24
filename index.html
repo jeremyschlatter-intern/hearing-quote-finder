@@ -441,20 +441,25 @@
             totalQuotes = data.total;
 
             const feed = document.getElementById('quoteFeed');
+
+            if (resetOffset) {
+                // Preserve emptyState element before clearing
+                feed.innerHTML = `<div class="empty-state" id="emptyState" style="display:none;">
+                    <h3>No quotes yet</h3>
+                    <p>Add topics in the sidebar to start finding relevant quotes from hearing transcripts.</p>
+                </div>`;
+                allQuotesCache = [];
+            }
+
             const emptyState = document.getElementById('emptyState');
-
-            if (resetOffset) { feed.innerHTML = ''; allQuotesCache = []; }
-
             allQuotesCache.push(...data.quotes);
 
             if (data.quotes.length === 0 && currentOffset === 0) {
-                feed.innerHTML = '';
-                feed.appendChild(emptyState);
                 emptyState.style.display = 'block';
-                emptyState.querySelector('h3').textContent = currentTopicId ? 'Processing hearings...' : 'No quotes yet';
+                emptyState.querySelector('h3').textContent = currentTopicId ? 'Processing hearings...' : 'No quotes found';
                 emptyState.querySelector('p').textContent = currentTopicId
                     ? 'Scanning hearing transcripts for this topic. Quotes will appear here as they\'re found.'
-                    : 'Add topics in the sidebar to start finding relevant quotes from hearing transcripts.';
+                    : 'No quotes match your current filters. Try a wider date range or different search.';
             } else {
                 emptyState.style.display = 'none';
                 data.quotes.forEach(q => feed.appendChild(createQuoteCard(q)));
