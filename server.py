@@ -2,30 +2,124 @@
 
 import asyncio
 import os
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 
 from database import init_db, get_db
 from ingest import ingest_hearings
-from extract import process_topic, get_quote_detail
+from extract import process_topic_for_hearing, get_quote_detail, screen_hearing_relevance, extract_quotes_for_topic
 
-app = FastAPI(title="Hearing Quote Finder")
+# Background worker state
+_worker_task = None
 
-# Track background processing
-processing_tasks = {}
+
+@asynccontextmanager
+async def lifespan(app):
+    """Startup and shutdown logic."""
+    await init_db()
+    await recover_stale_processing()
+    await ensure_all_pending_records()
+    # Start background worker
+    global _worker_task
+    _worker_task = asyncio.create_task(scan_worker())
+    yield
+    # Shutdown
+    if _worker_task:
+        _worker_task.cancel()
+        try:
+            await _worker_task
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(title="Hearing Quote Finder", lifespan=lifespan)
+
+
+async def recover_stale_processing():
+    """On startup, reset any 'processing' records to 'pending' (interrupted by restart)."""
+    db = await get_db()
+    result = await db.execute(
+        "UPDATE processing_status SET status = 'pending' WHERE status = 'processing'"
+    )
+    count = result.rowcount
+    await db.commit()
+    await db.close()
+    if count:
+        print(f"Recovered {count} interrupted processing records")
+
+
+async def ensure_all_pending_records():
+    """Ensure every topic/hearing combo has a processing_status record."""
+    db = await get_db()
+    inserted = 0
+    topics = await db.execute_fetchall("SELECT id FROM topics")
+    hearings = await db.execute_fetchall("SELECT id FROM hearings WHERE transcript_fetched = 1")
+
+    for (tid,) in topics:
+        existing = await db.execute_fetchall(
+            "SELECT hearing_id FROM processing_status WHERE topic_id = ?", (tid,)
+        )
+        existing_ids = {r[0] for r in existing}
+        for (hid,) in hearings:
+            if hid not in existing_ids:
+                await db.execute(
+                    "INSERT INTO processing_status (topic_id, hearing_id, status) VALUES (?, ?, 'pending')",
+                    (tid, hid)
+                )
+                inserted += 1
+
+    await db.commit()
+    await db.close()
+    if inserted:
+        print(f"Created {inserted} pending processing records")
+
+
+SCAN_CONCURRENCY = 4  # Process up to 4 hearings in parallel
+
+
+async def scan_worker():
+    """Background worker that continuously processes pending items in parallel."""
+    print(f"Scan worker started (concurrency={SCAN_CONCURRENCY})")
+    while True:
+        try:
+            db = await get_db()
+            rows = await db.execute_fetchall("""
+                SELECT ps.topic_id, ps.hearing_id, t.name, t.description
+                FROM processing_status ps
+                JOIN topics t ON ps.topic_id = t.id
+                WHERE ps.status = 'pending'
+                ORDER BY t.created_at ASC, ps.hearing_id ASC
+                LIMIT ?
+            """, (SCAN_CONCURRENCY,))
+            await db.close()
+
+            if not rows:
+                await asyncio.sleep(5)
+                continue
+
+            # Process batch in parallel
+            tasks = [
+                process_topic_for_hearing(r[0], r[2], r[3] or "", r[1])
+                for r in rows
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            # Brief pause between batches
+            await asyncio.sleep(0.3)
+
+        except asyncio.CancelledError:
+            print("Scan worker shutting down")
+            return
+        except Exception as e:
+            print(f"Scan worker error: {e}")
+            await asyncio.sleep(5)
 
 
 class TopicCreate(BaseModel):
     name: str
     description: str = ""
-
-
-@app.on_event("startup")
-async def startup():
-    await init_db()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -48,12 +142,9 @@ async def list_hearings():
 
 
 @app.post("/api/ingest")
-async def trigger_ingest(background_tasks: BackgroundTasks, max_hearings: int = 60):
+async def trigger_ingest(max_hearings: int = 60):
     """Trigger hearing ingestion from GovInfo."""
-    async def do_ingest():
-        await ingest_hearings(max_hearings=max_hearings)
-
-    background_tasks.add_task(do_ingest)
+    asyncio.create_task(ingest_hearings(max_hearings=max_hearings))
     return {"status": "ingestion_started", "max_hearings": max_hearings}
 
 
@@ -64,7 +155,6 @@ async def list_topics():
 
     result = []
     for t in topics:
-        # Get processing status
         total = await db.execute_fetchall(
             "SELECT COUNT(*) FROM processing_status WHERE topic_id = ?", (t[0],)
         )
@@ -72,7 +162,7 @@ async def list_topics():
             "SELECT COUNT(*) FROM processing_status WHERE topic_id = ? AND status IN ('done', 'skipped', 'error')", (t[0],)
         )
         processing = await db.execute_fetchall(
-            "SELECT COUNT(*) FROM processing_status WHERE topic_id = ? AND status = 'processing'", (t[0],)
+            "SELECT COUNT(*) FROM processing_status WHERE topic_id = ? AND status IN ('processing', 'pending')", (t[0],)
         )
         quote_count = await db.execute_fetchall(
             "SELECT COUNT(*) FROM quotes WHERE topic_id = ?", (t[0],)
@@ -91,10 +181,9 @@ async def list_topics():
 
 
 @app.post("/api/topics")
-async def create_topic(topic: TopicCreate, background_tasks: BackgroundTasks):
+async def create_topic(topic: TopicCreate):
     db = await get_db()
 
-    # Check if topic exists
     existing = await db.execute_fetchall("SELECT id FROM topics WHERE name = ?", (topic.name,))
     if existing:
         await db.close()
@@ -105,35 +194,19 @@ async def create_topic(topic: TopicCreate, background_tasks: BackgroundTasks):
         (topic.name, topic.description)
     )
     topic_id = cursor.lastrowid
+
+    # Create pending records for all hearings - the worker will pick them up
+    hearings = await db.execute_fetchall("SELECT id FROM hearings WHERE transcript_fetched = 1")
+    for (hid,) in hearings:
+        await db.execute(
+            "INSERT INTO processing_status (topic_id, hearing_id, status) VALUES (?, ?, 'pending')",
+            (topic_id, hid)
+        )
+
     await db.commit()
     await db.close()
 
-    # Start background processing
-    async def do_process():
-        await process_topic(topic_id, topic.name, topic.description)
-
-    background_tasks.add_task(do_process)
-
-    return {"id": topic_id, "name": topic.name, "status": "processing_started"}
-
-
-@app.post("/api/topics/{topic_id}/rescan")
-async def rescan_topic(topic_id: int, background_tasks: BackgroundTasks):
-    """Re-scan unprocessed hearings for an existing topic."""
-    db = await get_db()
-    topic = await db.execute_fetchall("SELECT id, name, description FROM topics WHERE id = ?", (topic_id,))
-    if not topic:
-        await db.close()
-        raise HTTPException(status_code=404, detail="Topic not found")
-
-    tid, tname, tdesc = topic[0]
-    await db.close()
-
-    async def do_process():
-        await process_topic(tid, tname, tdesc or "")
-
-    background_tasks.add_task(do_process)
-    return {"status": "rescan_started", "topic": tname}
+    return {"id": topic_id, "name": topic.name, "status": "queued"}
 
 
 @app.delete("/api/topics/{topic_id}")
@@ -154,6 +227,7 @@ async def list_quotes(
     speaker: Optional[str] = None,
     search: Optional[str] = None,
     date_after: Optional[str] = None,
+    committee: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ):
@@ -176,10 +250,15 @@ async def list_quotes(
     if date_after:
         conditions.append("h.date_held >= ?")
         params.append(date_after)
+    if committee:
+        # Support comma-separated committee filter
+        committees = [c.strip() for c in committee.split(",")]
+        placeholders = " OR ".join(["h.committee LIKE ?" for _ in committees])
+        conditions.append(f"({placeholders})")
+        params.extend([f"%{c}%" for c in committees])
 
     where = " AND ".join(conditions) if conditions else "1=1"
 
-    # Get total count
     count_row = await db.execute_fetchall(
         f"SELECT COUNT(*) FROM quotes q JOIN hearings h ON q.hearing_id = h.id WHERE {where}",
         params
@@ -223,6 +302,7 @@ async def export_quotes(
     topic_id: Optional[int] = None,
     search: Optional[str] = None,
     date_after: Optional[str] = None,
+    committee: Optional[str] = None,
 ):
     """Export all matching quotes as CSV."""
     from fastapi.responses import StreamingResponse
@@ -241,6 +321,11 @@ async def export_quotes(
     if date_after:
         conditions.append("h.date_held >= ?")
         params.append(date_after)
+    if committee:
+        committees = [c.strip() for c in committee.split(",")]
+        placeholders = " OR ".join(["h.committee LIKE ?" for _ in committees])
+        conditions.append(f"({placeholders})")
+        params.extend([f"%{c}%" for c in committees])
 
     where = " AND ".join(conditions) if conditions else "1=1"
     rows = await db.execute_fetchall(f"""
@@ -271,7 +356,6 @@ async def export_quotes(
 
 @app.get("/api/speakers")
 async def list_speakers():
-    """Get unique speakers across all quotes."""
     db = await get_db()
     rows = await db.execute_fetchall("""
         SELECT DISTINCT speaker, COUNT(*) as quote_count
@@ -283,15 +367,30 @@ async def list_speakers():
     return [{"name": r[0], "quote_count": r[1]} for r in rows]
 
 
+@app.get("/api/committees")
+async def list_committees():
+    """Get unique committees that have quotes, grouped by chamber."""
+    db = await get_db()
+    rows = await db.execute_fetchall("""
+        SELECT DISTINCT h.committee, h.chamber, COUNT(q.id) as quote_count
+        FROM quotes q
+        JOIN hearings h ON q.hearing_id = h.id
+        WHERE h.committee IS NOT NULL AND h.committee != ''
+        GROUP BY h.committee, h.chamber
+        ORDER BY h.chamber, quote_count DESC
+    """)
+    await db.close()
+    return [{"name": r[0], "chamber": r[1], "quote_count": r[2]} for r in rows]
+
+
 @app.get("/api/status")
 async def get_status():
-    """Get overall system status."""
     db = await get_db()
     hearings = await db.execute_fetchall("SELECT COUNT(*) FROM hearings")
     transcripts = await db.execute_fetchall("SELECT COUNT(*) FROM hearings WHERE transcript_fetched = 1")
     topics = await db.execute_fetchall("SELECT COUNT(*) FROM topics")
     quotes = await db.execute_fetchall("SELECT COUNT(*) FROM quotes")
-    processing = await db.execute_fetchall("SELECT COUNT(*) FROM processing_status WHERE status = 'processing'")
+    pending = await db.execute_fetchall("SELECT COUNT(*) FROM processing_status WHERE status IN ('processing', 'pending')")
     await db.close()
 
     return {
@@ -299,7 +398,7 @@ async def get_status():
         "hearings_with_transcripts": transcripts[0][0],
         "topics_count": topics[0][0],
         "quotes_count": quotes[0][0],
-        "currently_processing": processing[0][0],
+        "currently_processing": pending[0][0],
     }
 
 

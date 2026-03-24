@@ -270,6 +270,11 @@
             </div>
             <div class="feed-controls">
                 <div class="date-filter">
+                    <select id="committeeFilter" onchange="loadQuotes()" title="Filter by committee">
+                        <option value="">All committees</option>
+                    </select>
+                </div>
+                <div class="date-filter">
                     <select id="dateFilter" onchange="loadQuotes()">
                         <option value="">All dates</option>
                         <option value="30">Past month</option>
@@ -330,13 +335,80 @@
         {name: 'Veterans', desc: 'Veterans Affairs, VA healthcare, GI Bill, veteran benefits, military transition'},
     ];
 
-    document.addEventListener('DOMContentLoaded', () => {
+    // Common committee shorthand mappings for the filter
+    const COMMITTEE_PRESETS = [
+        {label: 'SASC', value: 'Senate Armed Services', chamber: 'Senate'},
+        {label: 'HASC', value: 'House Armed Services', chamber: 'House'},
+        {label: 'SFR', value: 'Senate Foreign Relations', chamber: 'Senate'},
+        {label: 'HFA', value: 'Committee On Foreign Affairs', chamber: 'House'},
+        {label: 'SSCI', value: 'Select Committee On Intelligence', chamber: 'Senate'},
+        {label: 'HPSCI', value: 'Permanent Select Committee On Intelligence', chamber: 'House'},
+        {label: 'SAC', value: 'Senate Appropriations', chamber: 'Senate'},
+        {label: 'HAC', value: 'House Appropriations', chamber: 'House'},
+    ];
+
+    document.addEventListener('DOMContentLoaded', async () => {
         loadStatus();
         loadTopics();
-        loadQuotes();
         renderSuggestedTopics();
+        await loadCommittees();  // Must finish before loadQuotes reads the default
+        loadQuotes();
         pollInterval = setInterval(() => { loadStatus(); loadTopics(); }, 8000);
     });
+
+    async function loadCommittees() {
+        try {
+            const resp = await fetch(`${API}/api/committees`);
+            const committees = await resp.json();
+            const sel = document.getElementById('committeeFilter');
+            sel.innerHTML = '<option value="">All committees</option>';
+
+            // Group by chamber
+            const senate = committees.filter(c => c.chamber === 'Senate');
+            const house = committees.filter(c => c.chamber === 'House');
+            const joint = committees.filter(c => c.chamber === 'Joint');
+
+            // Add combined presets
+            const presetGroup = document.createElement('optgroup');
+            presetGroup.label = 'Quick Select';
+            presetGroup.appendChild(makeOpt('SASC + HASC', 'Armed Services'));
+            sel.appendChild(presetGroup);
+
+            if (senate.length) {
+                const g = document.createElement('optgroup');
+                g.label = 'Senate';
+                senate.forEach(c => {
+                    const preset = COMMITTEE_PRESETS.find(p => c.name.includes(p.value.split(' ').pop()));
+                    const label = preset ? `${c.name} (${c.quote_count})` : `${c.name} (${c.quote_count})`;
+                    g.appendChild(makeOpt(label, c.name));
+                });
+                sel.appendChild(g);
+            }
+            if (house.length) {
+                const g = document.createElement('optgroup');
+                g.label = 'House';
+                house.forEach(c => g.appendChild(makeOpt(`${c.name} (${c.quote_count})`, c.name)));
+                sel.appendChild(g);
+            }
+            if (joint.length) {
+                const g = document.createElement('optgroup');
+                g.label = 'Joint';
+                joint.forEach(c => g.appendChild(makeOpt(`${c.name} (${c.quote_count})`, c.name)));
+                sel.appendChild(g);
+            }
+
+            // Default to SASC if available
+            const sasc = committees.find(c => c.name.includes('Armed Services') && c.chamber === 'Senate');
+            if (sasc) sel.value = sasc.name;
+        } catch (e) { console.error('Error loading committees:', e); }
+    }
+
+    function makeOpt(label, value) {
+        const o = document.createElement('option');
+        o.textContent = label;
+        o.value = value;
+        return o;
+    }
 
     function toggleDesc() {
         const ta = document.getElementById('topicDesc');
@@ -434,6 +506,9 @@
 
         const dateAfter = getDateParam();
         if (dateAfter) url += `&date_after=${dateAfter}`;
+
+        const committee = document.getElementById('committeeFilter').value;
+        if (committee) url += `&committee=${encodeURIComponent(committee)}`;
 
         try {
             const resp = await fetch(url);
@@ -625,6 +700,8 @@
         if (search) url += `search=${encodeURIComponent(search)}&`;
         const dateAfter = getDateParam();
         if (dateAfter) url += `date_after=${dateAfter}&`;
+        const committee = document.getElementById('committeeFilter').value;
+        if (committee) url += `committee=${encodeURIComponent(committee)}&`;
         // Trigger download via server-side CSV
         const a = document.createElement('a');
         a.href = url; a.download = 'hearing_quotes.csv'; a.click();
