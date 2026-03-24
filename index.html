@@ -800,7 +800,9 @@
         document.getElementById('searchBox').placeholder = on
             ? 'Ask a question about hearing transcripts... (Enter to search)'
             : 'Search quotes, speakers, hearings...';
-        if (!on) loadQuotes();  // Switch back to regular results
+        const query = document.getElementById('searchBox').value.trim();
+        if (on && query) runSmartSearch();
+        else loadQuotes();
     }
 
     function debounceSearch() {
