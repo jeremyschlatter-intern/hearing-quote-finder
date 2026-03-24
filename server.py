@@ -69,7 +69,7 @@ async def list_topics():
             "SELECT COUNT(*) FROM processing_status WHERE topic_id = ?", (t[0],)
         )
         done = await db.execute_fetchall(
-            "SELECT COUNT(*) FROM processing_status WHERE topic_id = ? AND status = 'done'", (t[0],)
+            "SELECT COUNT(*) FROM processing_status WHERE topic_id = ? AND status IN ('done', 'skipped', 'error')", (t[0],)
         )
         processing = await db.execute_fetchall(
             "SELECT COUNT(*) FROM processing_status WHERE topic_id = ? AND status = 'processing'", (t[0],)
