@@ -117,6 +117,25 @@ async def create_topic(topic: TopicCreate, background_tasks: BackgroundTasks):
     return {"id": topic_id, "name": topic.name, "status": "processing_started"}
 
 
+@app.post("/api/topics/{topic_id}/rescan")
+async def rescan_topic(topic_id: int, background_tasks: BackgroundTasks):
+    """Re-scan unprocessed hearings for an existing topic."""
+    db = await get_db()
+    topic = await db.execute_fetchall("SELECT id, name, description FROM topics WHERE id = ?", (topic_id,))
+    if not topic:
+        await db.close()
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    tid, tname, tdesc = topic[0]
+    await db.close()
+
+    async def do_process():
+        await process_topic(tid, tname, tdesc or "")
+
+    background_tasks.add_task(do_process)
+    return {"status": "rescan_started", "topic": tname}
+
+
 @app.delete("/api/topics/{topic_id}")
 async def delete_topic(topic_id: int):
     db = await get_db()

@@ -69,11 +69,13 @@ TRANSCRIPT PREVIEW (first ~2000 chars):
 Answer with ONLY "yes" or "no". Say "yes" only if the hearing clearly covers this topic substantively, not just a passing mention."""
 
     try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=10,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        def _call():
+            return client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=10,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        response = await asyncio.to_thread(_call)
         answer = response.content[0].text.strip().lower()
         return answer.startswith("yes")
     except Exception:
@@ -121,11 +123,13 @@ JSON format for each quote:
 Return ONLY a JSON array."""
 
         try:
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            def _call():
+                return client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            response = await asyncio.to_thread(_call)
 
             response_text = response.content[0].text.strip()
             if response_text.startswith("```"):
