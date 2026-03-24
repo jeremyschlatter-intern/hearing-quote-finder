@@ -11,28 +11,33 @@ from typing import Optional
 from database import init_db, get_db
 from ingest import ingest_hearings
 from extract import process_topic_for_hearing, get_quote_detail, screen_hearing_relevance, extract_quotes_for_topic
+from embeddings import init_embedding_tables, embed_all_hearings, semantic_search, synthesize_answer
 
 # Background worker state
 _worker_task = None
+_embedding_task = None
 
 
 @asynccontextmanager
 async def lifespan(app):
     """Startup and shutdown logic."""
     await init_db()
+    await init_embedding_tables()
     await recover_stale_processing()
     await ensure_all_pending_records()
-    # Start background worker
-    global _worker_task
+    # Start background workers
+    global _worker_task, _embedding_task
     _worker_task = asyncio.create_task(scan_worker())
+    _embedding_task = asyncio.create_task(embedding_worker())
     yield
     # Shutdown
-    if _worker_task:
-        _worker_task.cancel()
-        try:
-            await _worker_task
-        except asyncio.CancelledError:
-            pass
+    for task in [_worker_task, _embedding_task]:
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="Hearing Quote Finder", lifespan=lifespan)
@@ -115,6 +120,44 @@ async def scan_worker():
         except Exception as e:
             print(f"Scan worker error: {e}")
             await asyncio.sleep(5)
+
+
+async def embedding_worker():
+    """Background worker that embeds hearings for semantic search."""
+    print("Embedding worker started")
+    # Wait a bit for the server to settle before starting
+    await asyncio.sleep(10)
+    while True:
+        try:
+            db = await get_db()
+            # Find hearings that need embedding
+            row = await db.execute_fetchall("""
+                SELECT h.id, h.title FROM hearings h
+                WHERE h.transcript_fetched = 1
+                AND h.id NOT IN (
+                    SELECT DISTINCT hearing_id FROM transcript_chunks WHERE embedding IS NOT NULL
+                )
+                LIMIT 1
+            """)
+            await db.close()
+
+            if not row:
+                await asyncio.sleep(30)  # Check less frequently when caught up
+                continue
+
+            from embeddings import embed_hearing
+            hid, title = row[0]
+            n = await embed_hearing(hid)
+            if n > 0:
+                print(f"Embedded: {title[:50]}... ({n} chunks)")
+            await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            print("Embedding worker shutting down")
+            return
+        except Exception as e:
+            print(f"Embedding worker error: {e}")
+            await asyncio.sleep(10)
 
 
 class TopicCreate(BaseModel):
@@ -218,6 +261,51 @@ async def delete_topic(topic_id: int):
     await db.commit()
     await db.close()
     return {"status": "deleted"}
+
+
+@app.get("/api/semantic-search")
+async def api_semantic_search(
+    q: str = "",
+    committee: Optional[str] = None,
+    date_after: Optional[str] = None,
+    synthesize: bool = False,
+    limit: int = 20,
+):
+    """Semantic search across hearing transcripts using embeddings."""
+    if not q:
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+    # Check if we have any embeddings
+    db = await get_db()
+    count = await db.execute_fetchall("SELECT COUNT(*) FROM transcript_chunks WHERE embedding IS NOT NULL")
+    await db.close()
+
+    if not count or count[0][0] == 0:
+        return {"results": [], "synthesis": None, "message": "Embeddings are still being generated. Please try again shortly."}
+
+    results = await semantic_search(q, limit=limit, committee_filter=committee, date_after=date_after)
+
+    synthesis_text = None
+    if synthesize and results:
+        try:
+            synthesis_text = await synthesize_answer(q, results)
+        except Exception as e:
+            synthesis_text = f"Synthesis error: {e}"
+
+    return {
+        "query": q,
+        "results": [{
+            "chunk_text": r["chunk_text"][:2000],
+            "speaker": r["speaker"],
+            "similarity": round(r["similarity"], 4),
+            "hearing_title": r["hearing_title"],
+            "date_held": r["date_held"],
+            "chamber": r["chamber"],
+            "committee": r["committee"],
+            "package_id": r["package_id"],
+        } for r in results],
+        "synthesis": synthesis_text,
+    }
 
 
 @app.get("/api/quotes")

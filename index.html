@@ -119,6 +119,46 @@
         }
         .multiselect-dropdown input[type="checkbox"] { margin: 0; }
 
+        /* Smart search */
+        .smart-search-toggle {
+            display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-light);
+        }
+        .smart-search-toggle input { margin: 0; }
+        .smart-search-toggle label { cursor: pointer; user-select: none; }
+        .synthesis-box {
+            background: linear-gradient(135deg, #f0f7ff 0%, #f5f0ff 100%);
+            border: 1px solid var(--blue-light); border-radius: var(--radius);
+            padding: 20px 24px; margin-bottom: 16px;
+        }
+        .synthesis-box h3 {
+            font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--blue); margin-bottom: 10px;
+        }
+        .synthesis-box .synthesis-text {
+            font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap;
+        }
+        .semantic-result {
+            background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 16px 20px; margin-bottom: 10px;
+        }
+        .semantic-result .sr-header {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap;
+        }
+        .semantic-result .sr-speaker { font-weight: 600; font-size: 14px; color: var(--navy); }
+        .semantic-result .sr-score {
+            font-size: 11px; padding: 1px 8px; border-radius: 4px;
+            background: #e8f0fe; color: var(--blue); font-weight: 600;
+        }
+        .semantic-result .sr-text {
+            font-size: 14px; line-height: 1.6; color: var(--text);
+            border-left: 3px solid var(--blue-light); padding-left: 14px; margin-bottom: 10px;
+            max-height: 150px; overflow: hidden; position: relative;
+        }
+        .semantic-result .sr-text.expanded { max-height: none; }
+        .semantic-result .sr-meta { font-size: 12px; color: var(--text-light); }
+        .semantic-result .sr-meta .committee-name { font-weight: 500; color: var(--navy); }
+        .search-loading { text-align: center; padding: 40px; color: var(--text-light); font-size: 14px; }
+
         .sidebar-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
         .stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: var(--text-light); }
         .stat-row .stat-value { font-weight: 600; color: var(--text); }
@@ -314,7 +354,14 @@
                 </div>
                 <input type="text" class="search-box" id="searchBox"
                        placeholder="Search quotes, speakers, hearings..."
-                       oninput="debounceSearch()">
+                       oninput="debounceSearch()"
+                       onkeypress="if(event.key==='Enter' && isSmartSearch()) runSmartSearch()">
+                <div class="smart-search-toggle">
+                    <input type="checkbox" id="smartSearchToggle" onchange="onSmartToggle()">
+                    <label for="smartSearchToggle">Smart search</label>
+                    <input type="checkbox" id="synthesizeToggle" style="margin-left: 8px;" disabled>
+                    <label for="synthesizeToggle" style="opacity: 0.5;" id="synthesizeLabel">AI summary</label>
+                </div>
                 <button class="export-btn" onclick="exportQuotes()" title="Export current view to CSV">Export CSV</button>
             </div>
         </div>
@@ -730,9 +777,87 @@
 
     function loadMoreQuotes() { currentOffset += 30; loadQuotes(false); }
 
+    function isSmartSearch() { return document.getElementById('smartSearchToggle').checked; }
+
+    function onSmartToggle() {
+        const on = isSmartSearch();
+        document.getElementById('synthesizeToggle').disabled = !on;
+        document.getElementById('synthesizeLabel').style.opacity = on ? '1' : '0.5';
+        document.getElementById('searchBox').placeholder = on
+            ? 'Ask a question about hearing transcripts...'
+            : 'Search quotes, speakers, hearings...';
+    }
+
     function debounceSearch() {
+        if (isSmartSearch()) return;  // Smart search requires Enter
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => loadQuotes(), 300);
+    }
+
+    async function runSmartSearch() {
+        const query = document.getElementById('searchBox').value.trim();
+        if (!query) return;
+        const synthesize = document.getElementById('synthesizeToggle').checked;
+
+        const feed = document.getElementById('quoteFeed');
+        feed.innerHTML = `<div class="search-loading"><span class="processing-indicator"><span class="spinner"></span></span> Searching across hearing transcripts${synthesize ? ' and generating summary' : ''}...</div>`;
+        document.getElementById('resultsCount').textContent = '';
+        document.getElementById('loadMore').style.display = 'none';
+
+        let url = `${API}/api/semantic-search?q=${encodeURIComponent(query)}&limit=20`;
+        if (selectedCommittees.length > 0) url += `&committee=${encodeURIComponent(selectedCommittees.join(','))}`;
+        const dateAfter = getDateParam();
+        if (dateAfter) url += `&date_after=${dateAfter}`;
+        if (synthesize) url += `&synthesize=true`;
+
+        try {
+            const resp = await fetch(url);
+            const data = await resp.json();
+
+            feed.innerHTML = '';
+
+            if (data.message) {
+                feed.innerHTML = `<div class="empty-state"><h3>Embeddings loading</h3><p>${esc(data.message)}</p></div>`;
+                return;
+            }
+
+            // Show synthesis if available
+            if (data.synthesis) {
+                const box = document.createElement('div');
+                box.className = 'synthesis-box';
+                box.innerHTML = `<h3>AI Summary</h3><div class="synthesis-text">${esc(data.synthesis)}</div>`;
+                feed.appendChild(box);
+            }
+
+            if (data.results.length === 0) {
+                feed.innerHTML += `<div class="empty-state"><h3>No results</h3><p>No matching transcript passages found. Try a broader query.</p></div>`;
+            }
+
+            // Show results
+            data.results.forEach((r, i) => {
+                const el = document.createElement('div');
+                el.className = 'semantic-result';
+                const scorePercent = Math.round(r.similarity * 100);
+                el.innerHTML = `
+                    <div class="sr-header">
+                        <span class="sr-speaker">${esc(r.speaker || 'Unknown')}</span>
+                        <span class="sr-score">${scorePercent}% match</span>
+                        <span class="chamber-badge ${r.chamber === 'House' ? 'chamber-house' : r.chamber === 'Senate' ? 'chamber-senate' : 'chamber-joint'}">${esc(r.chamber || '')}</span>
+                    </div>
+                    <div class="sr-text" id="sr-text-${i}" onclick="this.classList.toggle('expanded')">${esc(r.chunk_text)}</div>
+                    <div class="sr-meta">
+                        ${r.committee ? `<span class="committee-name">${esc(r.committee)}</span>` : ''}
+                        <span>${esc(r.hearing_title ? r.hearing_title.slice(0, 70) : '')}</span>
+                        <span>${formatDate(r.date_held)}</span>
+                        <a href="https://www.govinfo.gov/app/details/${r.package_id}" target="_blank" rel="noopener" style="color:var(--blue)">GovInfo</a>
+                    </div>`;
+                feed.appendChild(el);
+            });
+
+            document.getElementById('resultsCount').textContent = `${data.results.length} passages found`;
+        } catch (e) {
+            feed.innerHTML = `<div class="empty-state"><h3>Search error</h3><p>${esc(e.message)}</p></div>`;
+        }
     }
 
     function exportQuotes() {

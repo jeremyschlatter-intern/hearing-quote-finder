@@ -5,7 +5,10 @@
 ### 1. Ingest more hearings
 Only 60 of ~574 available hearings are ingested (~10%). Should ingest all or most for comprehensive coverage.
 
-### 3. Quotes should sort most-recent-first
+### 3. Consider removing quote caps
+Currently capped at 3 quotes per chunk and 15 per hearing. This was added to prevent one massive hearing (DoD Appropriations) from dominating the feed. But it means we're silently dropping potentially relevant quotes. Consider removing or raising these limits, perhaps with a smarter deduplication or ranking approach instead.
+
+### 4. Quotes should sort most-recent-first
 Already implemented - `ORDER BY h.date_held DESC`. The April 2025 results shown are the most recent SASC hearings in the 60-hearing dataset. Will look more recent once more hearings are ingested (#1).
 
 ## Closed
