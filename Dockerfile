@@ -6,6 +6,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY database.py .
+COPY embeddings.py .
 COPY extract.py .
 COPY ingest.py .
 COPY server.py .

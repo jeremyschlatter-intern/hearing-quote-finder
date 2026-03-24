@@ -5,3 +5,5 @@ httpx
 anthropic
 pydantic
 gunicorn
+numpy
+openai
