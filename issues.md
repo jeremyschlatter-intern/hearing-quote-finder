@@ -5,6 +5,9 @@
 ### 1. Ingest more hearings
 Only 60 of ~574 available hearings are ingested (~10%). Should ingest all or most for comprehensive coverage.
 
+### 3. Quotes should sort most-recent-first
+Already implemented - `ORDER BY h.date_held DESC`. The April 2025 results shown are the most recent SASC hearings in the 60-hearing dataset. Will look more recent once more hearings are ingested (#1).
+
 ## Closed
 
 ### 2. Date filter breaks the app

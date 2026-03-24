@@ -92,6 +92,33 @@
         .topic-all:hover { background: var(--bg); }
         .topic-all.active { background: #e8f0fe; color: var(--blue); }
 
+        /* Multi-select committee dropdown */
+        .multiselect { position: relative; display: inline-block; }
+        .multiselect-btn {
+            padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+            font-size: 13px; background: white; cursor: pointer; min-width: 180px;
+            text-align: left; display: flex; justify-content: space-between; align-items: center;
+        }
+        .multiselect-btn:hover { border-color: var(--blue); }
+        .multiselect-btn .arrow { font-size: 10px; margin-left: 8px; color: var(--text-light); }
+        .multiselect-dropdown {
+            display: none; position: absolute; top: 100%; left: 0; z-index: 100;
+            background: white; border: 1px solid var(--border); border-radius: var(--radius);
+            box-shadow: var(--shadow-lg); min-width: 280px; max-height: 320px; overflow-y: auto;
+            margin-top: 4px;
+        }
+        .multiselect-dropdown.open { display: block; }
+        .multiselect-dropdown label {
+            display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+            font-size: 13px; cursor: pointer; transition: background 0.1s;
+        }
+        .multiselect-dropdown label:hover { background: var(--bg); }
+        .multiselect-dropdown .group-label {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+            color: var(--text-light); padding: 8px 12px 4px; font-weight: 600;
+        }
+        .multiselect-dropdown input[type="checkbox"] { margin: 0; }
+
         .sidebar-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
         .stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: var(--text-light); }
         .stat-row .stat-value { font-weight: 600; color: var(--text); }
@@ -269,10 +296,12 @@
                 <span class="results-count" id="resultsCount"></span>
             </div>
             <div class="feed-controls">
-                <div class="date-filter">
-                    <select id="committeeFilter" onchange="loadQuotes()" title="Filter by committee">
-                        <option value="">All committees</option>
-                    </select>
+                <div class="multiselect" id="committeeMultiselect">
+                    <button class="multiselect-btn" onclick="toggleCommitteeDropdown()" type="button">
+                        <span id="committeeLabel">Committees</span>
+                        <span class="arrow">&#9662;</span>
+                    </button>
+                    <div class="multiselect-dropdown" id="committeeDropdown"></div>
                 </div>
                 <div class="date-filter">
                     <select id="dateFilter" onchange="loadQuotes()">
@@ -335,18 +364,6 @@
         {name: 'Veterans', desc: 'Veterans Affairs, VA healthcare, GI Bill, veteran benefits, military transition'},
     ];
 
-    // Common committee shorthand mappings for the filter
-    const COMMITTEE_PRESETS = [
-        {label: 'SASC', value: 'Senate Armed Services', chamber: 'Senate'},
-        {label: 'HASC', value: 'House Armed Services', chamber: 'House'},
-        {label: 'SFR', value: 'Senate Foreign Relations', chamber: 'Senate'},
-        {label: 'HFA', value: 'Committee On Foreign Affairs', chamber: 'House'},
-        {label: 'SSCI', value: 'Select Committee On Intelligence', chamber: 'Senate'},
-        {label: 'HPSCI', value: 'Permanent Select Committee On Intelligence', chamber: 'House'},
-        {label: 'SAC', value: 'Senate Appropriations', chamber: 'Senate'},
-        {label: 'HAC', value: 'House Appropriations', chamber: 'House'},
-    ];
-
     document.addEventListener('DOMContentLoaded', async () => {
         loadStatus();
         loadTopics();
@@ -356,59 +373,85 @@
         pollInterval = setInterval(() => { loadStatus(); loadTopics(); }, 8000);
     });
 
+    let selectedCommittees = [];
+    let allCommittees = [];
+
     async function loadCommittees() {
         try {
             const resp = await fetch(`${API}/api/committees`);
-            const committees = await resp.json();
-            const sel = document.getElementById('committeeFilter');
-            sel.innerHTML = '<option value="">All committees</option>';
+            allCommittees = await resp.json();
 
-            // Group by chamber
-            const senate = committees.filter(c => c.chamber === 'Senate');
-            const house = committees.filter(c => c.chamber === 'House');
-            const joint = committees.filter(c => c.chamber === 'Joint');
+            // Default: select SASC
+            const sasc = allCommittees.find(c => c.name.includes('Armed Services') && c.chamber === 'Senate');
+            if (sasc) selectedCommittees = [sasc.name];
 
-            // Add combined presets
-            const presetGroup = document.createElement('optgroup');
-            presetGroup.label = 'Quick Select';
-            presetGroup.appendChild(makeOpt('SASC + HASC', 'Armed Services'));
-            sel.appendChild(presetGroup);
-
-            if (senate.length) {
-                const g = document.createElement('optgroup');
-                g.label = 'Senate';
-                senate.forEach(c => {
-                    const preset = COMMITTEE_PRESETS.find(p => c.name.includes(p.value.split(' ').pop()));
-                    const label = preset ? `${c.name} (${c.quote_count})` : `${c.name} (${c.quote_count})`;
-                    g.appendChild(makeOpt(label, c.name));
-                });
-                sel.appendChild(g);
-            }
-            if (house.length) {
-                const g = document.createElement('optgroup');
-                g.label = 'House';
-                house.forEach(c => g.appendChild(makeOpt(`${c.name} (${c.quote_count})`, c.name)));
-                sel.appendChild(g);
-            }
-            if (joint.length) {
-                const g = document.createElement('optgroup');
-                g.label = 'Joint';
-                joint.forEach(c => g.appendChild(makeOpt(`${c.name} (${c.quote_count})`, c.name)));
-                sel.appendChild(g);
-            }
-
-            // Default to SASC if available
-            const sasc = committees.find(c => c.name.includes('Armed Services') && c.chamber === 'Senate');
-            if (sasc) sel.value = sasc.name;
+            renderCommitteeDropdown();
+            updateCommitteeLabel();
         } catch (e) { console.error('Error loading committees:', e); }
     }
 
-    function makeOpt(label, value) {
-        const o = document.createElement('option');
-        o.textContent = label;
-        o.value = value;
-        return o;
+    function renderCommitteeDropdown() {
+        const dd = document.getElementById('committeeDropdown');
+        dd.innerHTML = '';
+
+        const groups = {Senate: [], House: [], Joint: []};
+        allCommittees.forEach(c => {
+            const g = groups[c.chamber] || groups['Joint'];
+            if (g) g.push(c);
+        });
+
+        for (const [chamber, items] of Object.entries(groups)) {
+            if (!items.length) continue;
+            const gl = document.createElement('div');
+            gl.className = 'group-label';
+            gl.textContent = chamber;
+            dd.appendChild(gl);
+            items.forEach(c => {
+                const label = document.createElement('label');
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = c.name;
+                cb.checked = selectedCommittees.includes(c.name);
+                cb.onchange = () => onCommitteeToggle(c.name, cb.checked);
+                label.appendChild(cb);
+                label.appendChild(document.createTextNode(` ${c.name} (${c.quote_count})`));
+                dd.appendChild(label);
+            });
+        }
     }
+
+    function onCommitteeToggle(name, checked) {
+        if (checked) {
+            if (!selectedCommittees.includes(name)) selectedCommittees.push(name);
+        } else {
+            selectedCommittees = selectedCommittees.filter(n => n !== name);
+        }
+        updateCommitteeLabel();
+        loadQuotes();
+    }
+
+    function updateCommitteeLabel() {
+        const label = document.getElementById('committeeLabel');
+        if (selectedCommittees.length === 0) label.textContent = 'All committees';
+        else if (selectedCommittees.length === 1) {
+            // Abbreviate long names
+            const name = selectedCommittees[0];
+            label.textContent = name.length > 25 ? name.slice(0, 22) + '...' : name;
+        }
+        else label.textContent = `${selectedCommittees.length} committees`;
+    }
+
+    function toggleCommitteeDropdown() {
+        document.getElementById('committeeDropdown').classList.toggle('open');
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        const ms = document.getElementById('committeeMultiselect');
+        if (ms && !ms.contains(e.target)) {
+            document.getElementById('committeeDropdown').classList.remove('open');
+        }
+    });
 
     function toggleDesc() {
         const ta = document.getElementById('topicDesc');
@@ -507,8 +550,7 @@
         const dateAfter = getDateParam();
         if (dateAfter) url += `&date_after=${dateAfter}`;
 
-        const committee = document.getElementById('committeeFilter').value;
-        if (committee) url += `&committee=${encodeURIComponent(committee)}`;
+        if (selectedCommittees.length > 0) url += `&committee=${encodeURIComponent(selectedCommittees.join(','))}`;
 
         try {
             const resp = await fetch(url);
@@ -700,8 +742,7 @@
         if (search) url += `search=${encodeURIComponent(search)}&`;
         const dateAfter = getDateParam();
         if (dateAfter) url += `date_after=${dateAfter}&`;
-        const committee = document.getElementById('committeeFilter').value;
-        if (committee) url += `committee=${encodeURIComponent(committee)}&`;
+        if (selectedCommittees.length > 0) url += `committee=${encodeURIComponent(selectedCommittees.join(','))}&`;
         // Trigger download via server-side CSV
         const a = document.createElement('a');
         a.href = url; a.download = 'hearing_quotes.csv'; a.click();
