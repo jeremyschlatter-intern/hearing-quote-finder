@@ -1,0 +1,5 @@
+hearing_quotes.db
+hearing_quotes.db-shm
+hearing_quotes.db-wal
+__pycache__/
+*.pyc

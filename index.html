@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hearing Quote Finder</title>
+    <style>
+        :root {
+            --navy: #1a2744;
+            --navy-light: #2c3e5a;
+            --blue: #3b6eb5;
+            --blue-light: #5a8fd4;
+            --gold: #c5a55a;
+            --bg: #f5f6f8;
+            --white: #ffffff;
+            --text: #2c2c2c;
+            --text-light: #6b7280;
+            --border: #e2e5ea;
+            --shadow: 0 1px 3px rgba(0,0,0,0.08);
+            --shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
+            --radius: 8px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg); color: var(--text); line-height: 1.6;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+            color: white; padding: 18px 32px;
+            display: flex; align-items: center; justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        header h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+        header h1 span { color: var(--gold); }
+        .header-status { font-size: 13px; opacity: 0.8; }
+
+        .app-layout { display: flex; max-width: 1400px; margin: 0 auto; min-height: calc(100vh - 62px); }
+
+        .sidebar {
+            width: 300px; min-width: 300px; background: var(--white);
+            border-right: 1px solid var(--border); padding: 20px; overflow-y: auto;
+        }
+        .sidebar h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-light); margin-bottom: 12px; }
+
+        .topic-form { margin-bottom: 16px; }
+        .topic-form .row { display: flex; gap: 8px; margin-bottom: 6px; }
+        .topic-form input, .topic-form textarea {
+            flex: 1; padding: 8px 12px; border: 1px solid var(--border);
+            border-radius: var(--radius); font-size: 14px; outline: none;
+            transition: border-color 0.2s; font-family: inherit;
+        }
+        .topic-form input:focus, .topic-form textarea:focus { border-color: var(--blue); }
+        .topic-form textarea { resize: vertical; min-height: 36px; font-size: 12px; display: none; }
+        .topic-form textarea.visible { display: block; }
+        .topic-form .toggle-desc {
+            font-size: 11px; color: var(--blue); cursor: pointer; margin-bottom: 4px;
+            display: inline-block;
+        }
+        .topic-form .toggle-desc:hover { text-decoration: underline; }
+
+        .btn { padding: 8px 16px; border: none; border-radius: var(--radius); font-size: 14px; cursor: pointer; transition: all 0.2s; font-weight: 500; }
+        .btn-primary { background: var(--blue); color: white; }
+        .btn-primary:hover { background: var(--blue-light); }
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+        .btn-danger { background: transparent; color: #dc3545; border: 1px solid #dc3545; }
+        .btn-danger:hover { background: #dc3545; color: white; }
+        .btn-ghost { background: transparent; color: var(--text-light); }
+        .btn-ghost:hover { background: var(--bg); color: var(--text); }
+        .btn-outline { background: transparent; color: var(--blue); border: 1px solid var(--blue); }
+        .btn-outline:hover { background: var(--blue); color: white; }
+
+        .topic-list { list-style: none; }
+        .topic-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px 12px; border-radius: var(--radius); cursor: pointer;
+            transition: background 0.15s; margin-bottom: 2px;
+        }
+        .topic-item:hover { background: var(--bg); }
+        .topic-item.active { background: #e8f0fe; color: var(--blue); }
+        .topic-item .topic-info { display: flex; flex-direction: column; }
+        .topic-item .topic-name { font-weight: 500; font-size: 14px; }
+        .topic-item .topic-meta { font-size: 11px; color: var(--text-light); }
+        .topic-item .topic-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
+        .topic-item:hover .topic-actions { opacity: 1; }
+
+        .topic-all {
+            font-weight: 500; color: var(--text); margin-bottom: 8px;
+            padding: 10px 12px; border-radius: var(--radius); cursor: pointer;
+        }
+        .topic-all:hover { background: var(--bg); }
+        .topic-all.active { background: #e8f0fe; color: var(--blue); }
+
+        .sidebar-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+        .stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: var(--text-light); }
+        .stat-row .stat-value { font-weight: 600; color: var(--text); }
+
+        .suggested-topics { margin-top: 12px; }
+        .suggested-topics h3 { font-size: 12px; color: var(--text-light); margin-bottom: 8px; }
+        .suggested-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .suggested-chip {
+            padding: 4px 12px; border: 1px solid var(--border); border-radius: 16px;
+            font-size: 12px; cursor: pointer; transition: all 0.15s;
+            background: var(--white); color: var(--text);
+        }
+        .suggested-chip:hover { border-color: var(--blue); background: #e8f0fe; color: var(--blue); }
+        .suggested-chip.added { opacity: 0.4; pointer-events: none; text-decoration: line-through; }
+
+        .main-content { flex: 1; padding: 24px 32px; overflow-y: auto; }
+
+        .feed-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+        .feed-header h2 { font-size: 20px; font-weight: 600; }
+        .feed-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+        .search-box {
+            padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+            font-size: 14px; width: 220px; outline: none; transition: border-color 0.2s;
+        }
+        .search-box:focus { border-color: var(--blue); }
+
+        .date-filter select {
+            padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+            font-size: 13px; background: white; outline: none; cursor: pointer;
+        }
+
+        .export-btn {
+            padding: 7px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+            font-size: 13px; background: white; cursor: pointer; color: var(--text);
+            transition: all 0.2s;
+        }
+        .export-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+        .quote-card {
+            background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 20px 24px; margin-bottom: 12px; cursor: pointer;
+            transition: all 0.2s; position: relative;
+        }
+        .quote-card:hover { box-shadow: var(--shadow-lg); border-color: var(--blue-light); }
+        .quote-card .quote-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+        .quote-card .speaker-name { font-weight: 600; font-size: 15px; color: var(--navy); }
+        .quote-card .topic-badge {
+            display: inline-block; padding: 2px 10px; border-radius: 12px;
+            font-size: 11px; font-weight: 600; background: #e8f0fe; color: var(--blue);
+            text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        .quote-card .quote-text {
+            font-size: 15px; line-height: 1.7; color: var(--text);
+            margin-bottom: 12px; border-left: 3px solid var(--gold); padding-left: 16px;
+        }
+        .quote-card .quote-meta {
+            display: flex; align-items: center; gap: 12px; font-size: 12px;
+            color: var(--text-light); flex-wrap: wrap;
+        }
+        .quote-card .quote-meta .committee-name { font-weight: 500; color: var(--navy); }
+        .quote-card .quote-meta .hearing-name { font-style: italic; }
+
+        .quote-card .copy-btn {
+            position: absolute; top: 12px; right: 12px;
+            background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+            padding: 4px 10px; font-size: 11px; cursor: pointer;
+            opacity: 0; transition: opacity 0.15s; color: var(--text-light);
+        }
+        .quote-card:hover .copy-btn { opacity: 1; }
+        .quote-card .copy-btn:hover { background: var(--blue); color: white; border-color: var(--blue); }
+
+        .chamber-badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .chamber-house { background: #fef3e2; color: #d4770b; }
+        .chamber-senate { background: #e8f0fe; color: #3b6eb5; }
+        .chamber-joint { background: #f0e8fe; color: #7b3bb5; }
+
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); z-index: 1000;
+            justify-content: center; align-items: flex-start;
+            padding: 40px 20px; overflow-y: auto;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: var(--white); border-radius: 12px; max-width: 720px; width: 100%;
+            padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.2); position: relative;
+        }
+        .modal-close {
+            position: absolute; top: 16px; right: 16px;
+            background: none; border: none; font-size: 24px; cursor: pointer;
+            color: var(--text-light); width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center; border-radius: 50%;
+        }
+        .modal-close:hover { background: var(--bg); }
+        .modal h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-light); margin-bottom: 8px; }
+        .modal .detail-speaker { font-size: 20px; font-weight: 600; color: var(--navy); margin-bottom: 16px; }
+        .modal .detail-quote { font-size: 16px; line-height: 1.8; border-left: 3px solid var(--gold); padding-left: 20px; margin-bottom: 20px; }
+        .modal .context-section { background: var(--bg); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+        .modal .context-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-light); margin-bottom: 8px; }
+        .modal .context-section p { font-size: 14px; color: var(--text); line-height: 1.6; }
+        .modal .relevance-section { background: #f0f7ff; border-radius: var(--radius); padding: 16px; margin-bottom: 16px; border-left: 3px solid var(--blue); }
+        .modal .relevance-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--blue); margin-bottom: 6px; }
+        .modal .hearing-info { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-light); padding-top: 16px; border-top: 1px solid var(--border); }
+        .modal .hearing-info a { color: var(--blue); text-decoration: none; }
+        .modal .hearing-info a:hover { text-decoration: underline; }
+        .modal .modal-actions { display: flex; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--text-light); }
+        .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+        .empty-state p { font-size: 14px; max-width: 400px; margin: 0 auto; }
+
+        .processing-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--blue); padding: 2px 0; }
+        .processing-indicator .spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .load-more { text-align: center; padding: 16px; }
+        .results-count { font-size: 13px; color: var(--text-light); }
+
+        .toast {
+            position: fixed; bottom: 24px; right: 24px; background: var(--navy);
+            color: white; padding: 10px 20px; border-radius: var(--radius);
+            font-size: 14px; z-index: 2000; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+
+        @media (max-width: 900px) {
+            .app-layout { flex-direction: column; }
+            .sidebar { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid var(--border); }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div><h1>Hearing <span>Quote</span> Finder</h1></div>
+    <div class="header-status" id="headerStatus">Loading...</div>
+</header>
+
+<div class="app-layout">
+    <aside class="sidebar">
+        <h2>Your Topics</h2>
+        <div class="topic-form">
+            <div class="row">
+                <input type="text" id="topicInput" placeholder="Add a topic..."
+                       onkeypress="if(event.key==='Enter') addTopic()">
+                <button class="btn btn-primary btn-sm" onclick="addTopic()">Add</button>
+            </div>
+            <span class="toggle-desc" onclick="toggleDesc()">+ Add description for better results</span>
+            <textarea id="topicDesc" class="" placeholder="e.g. AI regulation, machine learning safety, algorithmic bias..."
+                      rows="2"></textarea>
+        </div>
+
+        <div class="topic-all active" id="topicAll" onclick="selectTopic(null)">All Topics</div>
+        <ul class="topic-list" id="topicList"></ul>
+
+        <div class="suggested-topics" id="suggestedTopics">
+            <h3>Quick-add topics</h3>
+            <div class="suggested-chips" id="suggestedChips"></div>
+        </div>
+
+        <div class="sidebar-section">
+            <h2>Data Status</h2>
+            <div class="stat-row"><span>Hearings indexed</span><span class="stat-value" id="statHearings">-</span></div>
+            <div class="stat-row"><span>Transcripts loaded</span><span class="stat-value" id="statTranscripts">-</span></div>
+            <div class="stat-row"><span>Quotes found</span><span class="stat-value" id="statQuotes">-</span></div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div class="feed-header">
+            <div>
+                <h2 id="feedTitle">Recent Quotes</h2>
+                <span class="results-count" id="resultsCount"></span>
+            </div>
+            <div class="feed-controls">
+                <div class="date-filter">
+                    <select id="dateFilter" onchange="loadQuotes()">
+                        <option value="">All dates</option>
+                        <option value="30">Past month</option>
+                        <option value="90" selected>Past 3 months</option>
+                        <option value="180">Past 6 months</option>
+                        <option value="365">Past year</option>
+                    </select>
+                </div>
+                <input type="text" class="search-box" id="searchBox"
+                       placeholder="Search quotes, speakers, hearings..."
+                       oninput="debounceSearch()">
+                <button class="export-btn" onclick="exportQuotes()" title="Export current view to CSV">Export CSV</button>
+            </div>
+        </div>
+
+        <div id="quoteFeed">
+            <div class="empty-state" id="emptyState">
+                <h3>Welcome to Hearing Quote Finder</h3>
+                <p>Add topics you care about in the sidebar. We'll scan recent congressional hearing transcripts and surface relevant quotes for you.</p>
+            </div>
+        </div>
+
+        <div class="load-more" id="loadMore" style="display:none;">
+            <button class="btn btn-ghost" onclick="loadMoreQuotes()">Load more quotes</button>
+        </div>
+    </main>
+</div>
+
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this) closeModal()">
+    <div class="modal" id="quoteModal">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <div id="modalContent"></div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    const API = '';
+    let currentTopicId = null;
+    let currentOffset = 0;
+    let totalQuotes = 0;
+    let searchTimeout = null;
+    let pollInterval = null;
+    let currentTopicNames = [];
+    let allQuotesCache = [];
+
+    const SUGGESTED_TOPICS = [
+        {name: 'Artificial Intelligence', desc: 'AI regulation, machine learning, automated decision-making, facial recognition, deepfakes, AI safety'},
+        {name: 'Immigration', desc: 'Immigration policy, border security, visa programs, asylum, DACA, deportation'},
+        {name: 'Defense & Military', desc: 'Military budget, Pentagon spending, weapons systems, troop deployments, NATO, military readiness'},
+        {name: 'Healthcare', desc: 'Healthcare policy, Medicare, Medicaid, drug pricing, public health, insurance'},
+        {name: 'Education', desc: 'K-12 education, higher ed, student loans, school funding, teacher policy, curriculum'},
+        {name: 'Climate & Energy', desc: 'Climate change, renewable energy, fossil fuels, emissions, EPA regulation'},
+        {name: 'Tech Regulation', desc: 'Big tech regulation, antitrust, social media, data privacy, Section 230'},
+        {name: 'China', desc: 'US-China relations, trade, Taiwan, intellectual property, security competition'},
+        {name: 'Government Oversight', desc: 'Government spending, fraud, accountability, inspector general, FOIA'},
+        {name: 'Veterans', desc: 'Veterans Affairs, VA healthcare, GI Bill, veteran benefits, military transition'},
+    ];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStatus();
+        loadTopics();
+        loadQuotes();
+        renderSuggestedTopics();
+        pollInterval = setInterval(() => { loadStatus(); loadTopics(); }, 8000);
+    });
+
+    function toggleDesc() {
+        const ta = document.getElementById('topicDesc');
+        ta.classList.toggle('visible');
+        const toggle = document.querySelector('.toggle-desc');
+        toggle.textContent = ta.classList.contains('visible') ? '- Hide description' : '+ Add description for better results';
+    }
+
+    function renderSuggestedTopics() {
+        const container = document.getElementById('suggestedChips');
+        container.innerHTML = '';
+        SUGGESTED_TOPICS.forEach(t => {
+            const chip = document.createElement('span');
+            chip.className = 'suggested-chip' + (currentTopicNames.includes(t.name) ? ' added' : '');
+            chip.textContent = t.name;
+            chip.onclick = () => {
+                if (!currentTopicNames.includes(t.name)) {
+                    document.getElementById('topicInput').value = t.name;
+                    document.getElementById('topicDesc').value = t.desc;
+                    addTopic();
+                }
+            };
+            container.appendChild(chip);
+        });
+    }
+
+    async function loadStatus() {
+        try {
+            const resp = await fetch(`${API}/api/status`);
+            const data = await resp.json();
+            document.getElementById('statHearings').textContent = data.hearings_total;
+            document.getElementById('statTranscripts').textContent = data.hearings_with_transcripts;
+            document.getElementById('statQuotes').textContent = data.quotes_count;
+            let statusText = `${data.hearings_with_transcripts} transcripts`;
+            if (data.currently_processing > 0) statusText += ` | Processing...`;
+            document.getElementById('headerStatus').textContent = statusText;
+        } catch (e) {
+            document.getElementById('headerStatus').textContent = 'Connection error';
+        }
+    }
+
+    async function loadTopics() {
+        try {
+            const resp = await fetch(`${API}/api/topics`);
+            const topics = await resp.json();
+            const list = document.getElementById('topicList');
+            list.innerHTML = '';
+            currentTopicNames = topics.map(t => t.name);
+            renderSuggestedTopics();
+
+            topics.forEach(t => {
+                const li = document.createElement('li');
+                li.className = `topic-item${currentTopicId === t.id ? ' active' : ''}`;
+                li.onclick = (e) => { if (!e.target.closest('.topic-actions')) selectTopic(t.id, t.name); };
+
+                let metaText = `${t.quote_count} quotes`;
+                let processingHtml = '';
+                if (t.hearings_processing > 0 || (t.hearings_done < t.hearings_total && t.hearings_total > 0)) {
+                    processingHtml = `<span class="processing-indicator"><span class="spinner"></span>Scanning (${t.hearings_done}/${t.hearings_total})</span>`;
+                }
+
+                li.innerHTML = `
+                    <div class="topic-info">
+                        <span class="topic-name">${esc(t.name)}</span>
+                        <span class="topic-meta">${metaText}</span>
+                        ${processingHtml}
+                    </div>
+                    <div class="topic-actions">
+                        <button class="btn btn-danger btn-sm" onclick="deleteTopic(${t.id}, '${esc(t.name)}')">Remove</button>
+                    </div>`;
+                list.appendChild(li);
+            });
+
+            const anyProcessing = topics.some(t => t.hearings_processing > 0 || (t.hearings_done < t.hearings_total && t.hearings_total > 0));
+            if (anyProcessing) loadQuotes(false);
+        } catch (e) { console.error('Error loading topics:', e); }
+    }
+
+    function getDateParam() {
+        const days = document.getElementById('dateFilter').value;
+        if (!days) return '';
+        const d = new Date();
+        d.setDate(d.getDate() - parseInt(days));
+        return d.toISOString().split('T')[0];
+    }
+
+    async function loadQuotes(resetOffset = true) {
+        if (resetOffset) currentOffset = 0;
+
+        let url = `${API}/api/quotes?limit=30&offset=${currentOffset}`;
+        if (currentTopicId) url += `&topic_id=${currentTopicId}`;
+
+        const search = document.getElementById('searchBox').value.trim();
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        const dateAfter = getDateParam();
+        if (dateAfter) url += `&date_after=${dateAfter}`;
+
+        try {
+            const resp = await fetch(url);
+            const data = await resp.json();
+            totalQuotes = data.total;
+
+            const feed = document.getElementById('quoteFeed');
+            const emptyState = document.getElementById('emptyState');
+
+            if (resetOffset) { feed.innerHTML = ''; allQuotesCache = []; }
+
+            allQuotesCache.push(...data.quotes);
+
+            if (data.quotes.length === 0 && currentOffset === 0) {
+                feed.innerHTML = '';
+                feed.appendChild(emptyState);
+                emptyState.style.display = 'block';
+                emptyState.querySelector('h3').textContent = currentTopicId ? 'Processing hearings...' : 'No quotes yet';
+                emptyState.querySelector('p').textContent = currentTopicId
+                    ? 'Scanning hearing transcripts for this topic. Quotes will appear here as they\'re found.'
+                    : 'Add topics in the sidebar to start finding relevant quotes from hearing transcripts.';
+            } else {
+                emptyState.style.display = 'none';
+                data.quotes.forEach(q => feed.appendChild(createQuoteCard(q)));
+            }
+
+            const showing = Math.min(currentOffset + data.quotes.length, totalQuotes);
+            document.getElementById('resultsCount').textContent =
+                totalQuotes > 0 ? `Showing ${showing} of ${totalQuotes} quotes` : '';
+
+            document.getElementById('loadMore').style.display =
+                (currentOffset + data.quotes.length < totalQuotes) ? 'block' : 'none';
+        } catch (e) { console.error('Error loading quotes:', e); }
+    }
+
+    function createQuoteCard(q) {
+        const card = document.createElement('div');
+        card.className = 'quote-card';
+        card.onclick = (e) => { if (!e.target.closest('.copy-btn')) showQuoteDetail(q.id); };
+
+        const chamberClass = q.chamber === 'House' ? 'chamber-house' : q.chamber === 'Senate' ? 'chamber-senate' : 'chamber-joint';
+
+        card.innerHTML = `
+            <button class="copy-btn" onclick="copyQuote(event, ${JSON.stringify(esc(q.quote_text)).replace(/"/g, '&quot;')}, '${esc(q.speaker)}')">Copy</button>
+            <div class="quote-header">
+                <span class="speaker-name">${esc(q.speaker)}</span>
+                <span class="topic-badge">${esc(q.topic_name)}</span>
+                <span class="chamber-badge ${chamberClass}">${esc(q.chamber || '')}</span>
+            </div>
+            <div class="quote-text">${esc(q.quote_text)}</div>
+            <div class="quote-meta">
+                ${q.committee ? `<span class="committee-name">${esc(q.committee)}</span>` : ''}
+                <span class="hearing-name">${esc(truncate(q.hearing_title, 70))}</span>
+                <span>${formatDate(q.date_held)}</span>
+            </div>`;
+        return card;
+    }
+
+    async function showQuoteDetail(quoteId) {
+        try {
+            const resp = await fetch(`${API}/api/quotes/${quoteId}`);
+            const q = await resp.json();
+            const chamberClass = q.chamber === 'House' ? 'chamber-house' : q.chamber === 'Senate' ? 'chamber-senate' : 'chamber-joint';
+
+            document.getElementById('modalContent').innerHTML = `
+                <h2>Quote Detail</h2>
+                <div class="detail-speaker">${esc(q.speaker)}</div>
+                <div class="detail-quote">${esc(q.quote_text)}</div>
+
+                ${q.context_before ? `<div class="context-section"><h3>Context (Before)</h3><p>${esc(q.context_before)}</p></div>` : ''}
+                ${q.context_after ? `<div class="context-section"><h3>Context (After)</h3><p>${esc(q.context_after)}</p></div>` : ''}
+                ${q.relevance ? `<div class="relevance-section"><h3>Why This Is Relevant</h3><p>${esc(q.relevance)}</p></div>` : ''}
+
+                <div class="hearing-info">
+                    <span><strong>Hearing:</strong> ${esc(q.hearing_title)}</span>
+                    <span><strong>Date:</strong> ${formatDate(q.date_held)}</span>
+                    <span><strong>Chamber:</strong> <span class="chamber-badge ${chamberClass}">${esc(q.chamber || '')}</span></span>
+                    ${q.committee ? `<span><strong>Committee:</strong> ${esc(q.committee)}</span>` : ''}
+                    <span><strong>Topic:</strong> ${esc(q.topic_name)}</span>
+                    <span><a href="https://www.govinfo.gov/app/details/${q.package_id}" target="_blank" rel="noopener">View full transcript on GovInfo &rarr;</a></span>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-outline btn-sm" onclick="copyQuoteFromModal()">Copy quote</button>
+                    <button class="btn btn-outline btn-sm" onclick="copyQuoteFormatted()">Copy for memo</button>
+                </div>`;
+            document.getElementById('modalOverlay').classList.add('active');
+            // Store for copy
+            window._currentQuote = q;
+        } catch (e) { console.error('Error loading quote detail:', e); }
+    }
+
+    function closeModal() { document.getElementById('modalOverlay').classList.remove('active'); }
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+    function copyQuote(event, text, speaker) {
+        event.stopPropagation();
+        navigator.clipboard.writeText(`"${text}" - ${speaker}`);
+        showToast('Quote copied to clipboard');
+    }
+
+    function copyQuoteFromModal() {
+        const q = window._currentQuote;
+        if (!q) return;
+        navigator.clipboard.writeText(`"${q.quote_text}" - ${q.speaker}`);
+        showToast('Quote copied');
+    }
+
+    function copyQuoteFormatted() {
+        const q = window._currentQuote;
+        if (!q) return;
+        const text = `"${q.quote_text}"\n\n- ${q.speaker}\n${q.hearing_title}\n${formatDate(q.date_held)} | ${q.committee || q.chamber}\n\nSource: https://www.govinfo.gov/app/details/${q.package_id}`;
+        navigator.clipboard.writeText(text);
+        showToast('Formatted quote copied');
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    function selectTopic(topicId, topicName) {
+        currentTopicId = topicId;
+        document.getElementById('feedTitle').textContent = topicId ? `Quotes: ${topicName}` : 'Recent Quotes';
+        document.getElementById('topicAll').classList.toggle('active', !topicId);
+        document.querySelectorAll('.topic-item').forEach(el => el.classList.remove('active'));
+        if (topicId) {
+            document.querySelectorAll('.topic-item').forEach(el => {
+                if (el.querySelector('.topic-name')?.textContent === topicName) el.classList.add('active');
+            });
+        }
+        loadQuotes();
+    }
+
+    async function addTopic() {
+        const input = document.getElementById('topicInput');
+        const descInput = document.getElementById('topicDesc');
+        const name = input.value.trim();
+        if (!name) return;
+        const description = descInput.value.trim();
+
+        try {
+            const resp = await fetch(`${API}/api/topics`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name, description}),
+            });
+            if (resp.ok) {
+                input.value = '';
+                descInput.value = '';
+                descInput.classList.remove('visible');
+                document.querySelector('.toggle-desc').textContent = '+ Add description for better results';
+                loadTopics();
+                loadStatus();
+                showToast(`Topic "${name}" added - scanning hearings...`);
+            } else {
+                const err = await resp.json();
+                showToast(err.detail || 'Error adding topic');
+            }
+        } catch (e) { console.error('Error adding topic:', e); }
+    }
+
+    async function deleteTopic(id, name) {
+        if (!confirm(`Remove topic "${name}" and all its quotes?`)) return;
+        try {
+            await fetch(`${API}/api/topics/${id}`, {method: 'DELETE'});
+            if (currentTopicId === id) selectTopic(null);
+            loadTopics(); loadQuotes(); loadStatus();
+        } catch (e) { console.error('Error deleting topic:', e); }
+    }
+
+    function loadMoreQuotes() { currentOffset += 30; loadQuotes(false); }
+
+    function debounceSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => loadQuotes(), 300);
+    }
+
+    function exportQuotes() {
+        if (allQuotesCache.length === 0) { showToast('No quotes to export'); return; }
+        const header = 'Speaker,Quote,Hearing,Date,Chamber,Committee,Topic,Relevance\n';
+        const rows = allQuotesCache.map(q =>
+            [q.speaker, q.quote_text, q.hearing_title, q.date_held, q.chamber, q.committee || '', q.topic_name, q.relevance || '']
+            .map(f => `"${(f||'').replace(/"/g, '""')}"`)
+            .join(',')
+        ).join('\n');
+        const blob = new Blob([header + rows], {type: 'text/csv'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'hearing_quotes.csv'; a.click();
+        URL.revokeObjectURL(url);
+        showToast(`Exported ${allQuotesCache.length} quotes`);
+    }
+
+    function esc(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+    function truncate(str, len) { return (!str) ? '' : str.length > len ? str.slice(0, len) + '...' : str; }
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        try { return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'}); }
+        catch { return dateStr; }
+    }
+</script>
+</body>
+</html>

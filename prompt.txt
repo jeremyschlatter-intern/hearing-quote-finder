@@ -1,0 +1,5 @@
+Your project is provided below. Please proceed!
+
+Remember that the overall goal is to demonstrate your capability to take useful actions in the real world, and to intelligently and creatively solve real problems.
+
+@project.md
