@@ -128,15 +128,33 @@
         .synthesis-box {
             background: linear-gradient(135deg, #f0f7ff 0%, #f5f0ff 100%);
             border: 1px solid var(--blue-light); border-radius: var(--radius);
-            padding: 20px 24px; margin-bottom: 16px;
+            margin-bottom: 16px; overflow: hidden;
         }
-        .synthesis-box h3 {
+        .synthesis-header {
+            padding: 14px 20px; cursor: pointer; display: flex; align-items: center;
+            justify-content: space-between; transition: background 0.15s;
+        }
+        .synthesis-header:hover { background: rgba(59,110,181,0.05); }
+        .synthesis-header h3 {
             font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;
-            color: var(--blue); margin-bottom: 10px;
+            color: var(--blue); margin: 0; display: flex; align-items: center; gap: 8px;
         }
-        .synthesis-box .synthesis-text {
-            font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap;
+        .synthesis-header .arrow { transition: transform 0.2s; font-size: 12px; color: var(--blue); }
+        .synthesis-header.open .arrow { transform: rotate(180deg); }
+        .synthesis-body { display: none; padding: 0 20px 20px; }
+        .synthesis-body.open { display: block; }
+        .synthesis-loading {
+            padding: 14px 20px; font-size: 13px; color: var(--blue);
+            display: flex; align-items: center; gap: 8px;
         }
+        .synthesis-text { font-size: 14px; line-height: 1.7; color: var(--text); }
+        .synthesis-text h2 { font-size: 16px; font-weight: 600; margin: 16px 0 8px; color: var(--navy); }
+        .synthesis-text h3 { font-size: 14px; font-weight: 600; margin: 12px 0 6px; color: var(--navy); }
+        .synthesis-text p { margin: 0 0 10px; }
+        .synthesis-text strong { font-weight: 600; }
+        .synthesis-text em { font-style: italic; }
+        .synthesis-text ul, .synthesis-text ol { margin: 4px 0 10px 20px; }
+        .synthesis-text li { margin: 2px 0; }
         .semantic-result {
             background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
             padding: 16px 20px; margin-bottom: 10px;
@@ -359,8 +377,6 @@
                 <div class="smart-search-toggle">
                     <input type="checkbox" id="smartSearchToggle" onchange="onSmartToggle()">
                     <label for="smartSearchToggle">Smart search</label>
-                    <input type="checkbox" id="synthesizeToggle" style="margin-left: 8px;" disabled>
-                    <label for="synthesizeToggle" style="opacity: 0.5;" id="synthesizeLabel">AI summary</label>
                 </div>
                 <button class="export-btn" onclick="exportQuotes()" title="Export current view to CSV">Export CSV</button>
             </div>
@@ -781,11 +797,10 @@
 
     function onSmartToggle() {
         const on = isSmartSearch();
-        document.getElementById('synthesizeToggle').disabled = !on;
-        document.getElementById('synthesizeLabel').style.opacity = on ? '1' : '0.5';
         document.getElementById('searchBox').placeholder = on
-            ? 'Ask a question about hearing transcripts...'
+            ? 'Ask a question about hearing transcripts... (Enter to search)'
             : 'Search quotes, speakers, hearings...';
+        if (!on) loadQuotes();  // Switch back to regular results
     }
 
     function debounceSearch() {
@@ -794,46 +809,79 @@
         searchTimeout = setTimeout(() => loadQuotes(), 300);
     }
 
+    function simpleMarkdown(text) {
+        if (!text) return '';
+        let html = esc(text);
+        // Headers
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        // Bold
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        // Italic
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        // Unordered lists
+        html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+        // Paragraphs (double newline)
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = '<p>' + html + '</p>';
+        // Clean up empty paragraphs
+        html = html.replace(/<p>\s*<\/p>/g, '');
+        html = html.replace(/<p>\s*(<h[23]>)/g, '$1');
+        html = html.replace(/(<\/h[23]>)\s*<\/p>/g, '$1');
+        html = html.replace(/<p>\s*(<ul>)/g, '$1');
+        html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
+        return html;
+    }
+
     async function runSmartSearch() {
         const query = document.getElementById('searchBox').value.trim();
         if (!query) return;
-        const synthesize = document.getElementById('synthesizeToggle').checked;
 
         const feed = document.getElementById('quoteFeed');
-        feed.innerHTML = `<div class="search-loading"><span class="processing-indicator"><span class="spinner"></span></span> Searching across hearing transcripts${synthesize ? ' and generating summary' : ''}...</div>`;
         document.getElementById('resultsCount').textContent = '';
         document.getElementById('loadMore').style.display = 'none';
 
-        let url = `${API}/api/semantic-search?q=${encodeURIComponent(query)}&limit=20`;
-        if (selectedCommittees.length > 0) url += `&committee=${encodeURIComponent(selectedCommittees.join(','))}`;
+        // Build base URL
+        let baseUrl = `${API}/api/semantic-search?q=${encodeURIComponent(query)}&limit=20`;
+        if (selectedCommittees.length > 0) baseUrl += `&committee=${encodeURIComponent(selectedCommittees.join(','))}`;
         const dateAfter = getDateParam();
-        if (dateAfter) url += `&date_after=${dateAfter}`;
-        if (synthesize) url += `&synthesize=true`;
+        if (dateAfter) baseUrl += `&date_after=${dateAfter}`;
 
+        // Show loading state with synthesis placeholder
+        feed.innerHTML = `
+            <div class="synthesis-box" id="synthesisBox">
+                <div class="synthesis-loading" id="synthesisLoading">
+                    <span class="processing-indicator"><span class="spinner"></span></span>
+                    Generating AI summary...
+                </div>
+            </div>
+            <div class="search-loading" id="resultsLoading">
+                <span class="processing-indicator"><span class="spinner"></span></span>
+                Searching across hearing transcripts...
+            </div>`;
+
+        // Fire both requests in parallel
+        const resultsPromise = fetch(baseUrl + '&synthesize=false').then(r => r.json());
+        const synthesisPromise = fetch(baseUrl + '&synthesize=true').then(r => r.json());
+
+        // Render results as soon as they arrive
         try {
-            const resp = await fetch(url);
-            const data = await resp.json();
-
-            feed.innerHTML = '';
+            const data = await resultsPromise;
+            const loading = document.getElementById('resultsLoading');
+            if (loading) loading.remove();
 
             if (data.message) {
                 feed.innerHTML = `<div class="empty-state"><h3>Embeddings loading</h3><p>${esc(data.message)}</p></div>`;
                 return;
             }
 
-            // Show synthesis if available
-            if (data.synthesis) {
-                const box = document.createElement('div');
-                box.className = 'synthesis-box';
-                box.innerHTML = `<h3>AI Summary</h3><div class="synthesis-text">${esc(data.synthesis)}</div>`;
-                feed.appendChild(box);
-            }
-
             if (data.results.length === 0) {
+                document.getElementById('synthesisBox')?.remove();
                 feed.innerHTML += `<div class="empty-state"><h3>No results</h3><p>No matching transcript passages found. Try a broader query.</p></div>`;
+                return;
             }
 
-            // Show results
             data.results.forEach((r, i) => {
                 const el = document.createElement('div');
                 el.className = 'semantic-result';
@@ -853,10 +901,31 @@
                     </div>`;
                 feed.appendChild(el);
             });
-
             document.getElementById('resultsCount').textContent = `${data.results.length} passages found`;
         } catch (e) {
-            feed.innerHTML = `<div class="empty-state"><h3>Search error</h3><p>${esc(e.message)}</p></div>`;
+            const loading = document.getElementById('resultsLoading');
+            if (loading) loading.innerHTML = `<div class="empty-state"><h3>Search error</h3><p>${esc(e.message)}</p></div>`;
+        }
+
+        // Render synthesis when it arrives
+        try {
+            const synthData = await synthesisPromise;
+            const box = document.getElementById('synthesisBox');
+            if (box && synthData.synthesis) {
+                box.innerHTML = `
+                    <div class="synthesis-header" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open')">
+                        <h3>AI Summary <span style="font-weight:400;text-transform:none;font-size:12px;color:var(--text-light)">- click to expand</span></h3>
+                        <span class="arrow">&#9662;</span>
+                    </div>
+                    <div class="synthesis-body">
+                        <div class="synthesis-text">${simpleMarkdown(synthData.synthesis)}</div>
+                    </div>`;
+            } else if (box) {
+                box.remove();
+            }
+        } catch (e) {
+            const box = document.getElementById('synthesisBox');
+            if (box) box.remove();
         }
     }
 
