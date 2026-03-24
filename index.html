@@ -614,19 +614,16 @@
     }
 
     function exportQuotes() {
-        if (allQuotesCache.length === 0) { showToast('No quotes to export'); return; }
-        const header = 'Speaker,Quote,Hearing,Date,Chamber,Committee,Topic,Relevance\n';
-        const rows = allQuotesCache.map(q =>
-            [q.speaker, q.quote_text, q.hearing_title, q.date_held, q.chamber, q.committee || '', q.topic_name, q.relevance || '']
-            .map(f => `"${(f||'').replace(/"/g, '""')}"`)
-            .join(',')
-        ).join('\n');
-        const blob = new Blob([header + rows], {type: 'text/csv'});
-        const url = URL.createObjectURL(blob);
+        let url = `${API}/api/export?`;
+        if (currentTopicId) url += `topic_id=${currentTopicId}&`;
+        const search = document.getElementById('searchBox').value.trim();
+        if (search) url += `search=${encodeURIComponent(search)}&`;
+        const dateAfter = getDateParam();
+        if (dateAfter) url += `date_after=${dateAfter}&`;
+        // Trigger download via server-side CSV
         const a = document.createElement('a');
         a.href = url; a.download = 'hearing_quotes.csv'; a.click();
-        URL.revokeObjectURL(url);
-        showToast(`Exported ${allQuotesCache.length} quotes`);
+        showToast(`Exporting all ${totalQuotes} quotes...`);
     }
 
     function esc(str) {

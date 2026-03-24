@@ -199,6 +199,57 @@ async def get_quote(quote_id: int):
     return detail
 
 
+@app.get("/api/export")
+async def export_quotes(
+    topic_id: Optional[int] = None,
+    search: Optional[str] = None,
+    date_after: Optional[str] = None,
+):
+    """Export all matching quotes as CSV."""
+    from fastapi.responses import StreamingResponse
+    import csv
+    import io
+
+    db = await get_db()
+    conditions = []
+    params = []
+    if topic_id:
+        conditions.append("q.topic_id = ?")
+        params.append(topic_id)
+    if search:
+        conditions.append("(q.quote_text LIKE ? OR q.speaker LIKE ? OR h.title LIKE ? OR h.committee LIKE ?)")
+        params.extend([f"%{search}%"] * 4)
+    if date_after:
+        conditions.append("h.date_held >= ?")
+        params.append(date_after)
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    rows = await db.execute_fetchall(f"""
+        SELECT q.speaker, q.quote_text, h.title, h.date_held, h.chamber, h.committee,
+               t.name, q.relevance, h.package_id
+        FROM quotes q
+        JOIN hearings h ON q.hearing_id = h.id
+        JOIN topics t ON q.topic_id = t.id
+        WHERE {where}
+        ORDER BY h.date_held DESC
+    """, params)
+    await db.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Speaker", "Quote", "Hearing", "Date", "Chamber", "Committee", "Topic", "Relevance", "GovInfo URL"])
+    for r in rows:
+        writer.writerow([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7],
+                        f"https://www.govinfo.gov/app/details/{r[8]}"])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=hearing_quotes.csv"}
+    )
+
+
 @app.get("/api/speakers")
 async def list_speakers():
     """Get unique speakers across all quotes."""
